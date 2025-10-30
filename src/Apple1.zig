@@ -79,72 +79,44 @@ fn update_input(self: *@This()) void {
 			else => err
 		} catch unreachable;
 
-		if (new_char == '\n') new_char = '\r';
-
-		if (n > 0) self.pia_in_buffer = new_char;
+		if (n > 0) self.pia_in_buffer = switch (new_char) {
+			'\n' => '\r',
+			else => new_char,
+		};
 	}
 }
 
 fn read_pia(self: *@This(), offset: u8) u8 {
 	self.update_input();
-	switch (offset) {
-		0x10 => {
-			if (self.pia_in_buffer) |v| {
-				self.pia_in_buffer = null;
-				return v | 0x80;
-			} else {
-				return 0x00;
-			}
-		},
-		0x11 => {
-			return if (self.pia_in_buffer) |_| 0x80 else 0x00;
-		},
-		0x12 => {
-			return 0x00;
-		},
-		0x13 => {
-			return 0x80;
-		},
+	return switch (offset) {
+		0x10 => if (self.pia_in_buffer) |v| blk: { self.pia_in_buffer = null; break :blk v | 0x80; } else 0x00,
+		0x11 => if (self.pia_in_buffer) |_| 0x80 else 0x00,
+		0x12 => 0x00,
+		0x13 => 0x80,
 
-
-		else => |v| {
+		else => |v| blk: {
 			std.debug.print("[ Apple1 ] attempted to access PIA+0x{X:0>2}\n", .{v});
-			return 0;
+			break :blk 0;
 		},
-	}
+	};
 }
 
 fn write_pia(self: *@This(), offset: u8, val: u8) void {
 	self.update_input();
 	switch (offset) {
-		0x10 => {
-			std.debug.print("[ Apple1 ] attempted write 0x{X:0>2} to keyboard in reg\n", .{val});
-		},
-		0x11 => {
-			std.debug.print("[ Apple1 ] attempted write 0x{X:0>2} to keyboard conf reg\n", .{val});
-		},
+		0x10 => std.debug.print("[ Apple1 ] attempted write 0x{X:0>2} to keyboard in reg\n", .{val}),
+		0x11 => {},
 		0x12 => {
-			//std.debug.print("<> attempting to show 0x{X:0>2}", .{val});
 			const char = val & 0x7F;
 			self.pia_writer.writeByte(switch (char) {
 				'\r' => '\n',
-				//':' => 'A',
-				//';' => 'B',
-				//'<' => 'C',
-				//'=' => 'D',
-				//'>' => 'E',
-				//'?' => 'F',
 				else => char,
 			}) catch unreachable;
 			self.pia_writer.flush() catch unreachable;
 		},
-		0x13 => {
-			std.debug.print("[ Apple1 ] attempted write 0x{X:0>2} to display conf reg\n", .{val});
-		},
+		0x13 => {},
 
-		else => |v| {
-			std.debug.print("[ Apple1 ] attempted to write 0x{X:0>2} to PIA+0x{X:0>2}\n", .{val, v});
-		},
+		else => |v| std.debug.print("[ Apple1 ] attempted to write 0x{X:0>2} to PIA+0x{X:0>2}\n", .{val, v}),
 	}
 }
 
@@ -154,21 +126,12 @@ fn read_fn(interface: *Interface, addr: u16) u8 {
 
 	const page: u8 = @truncate(addr >> 8);
 
-	switch (page) {
-		0x00 ... 0x0F => {
-			return self.mem[addr];
-		},
-		0xD0 => {
-			return self.read_pia(@truncate(addr));
-		},
-		0xFF => {
-			return wozmon[@as(u8, @truncate(addr))];
-		},
-		else => {
-			//std.debug.print("[ Apple1 ] attempted read 0x{X:0>4}\n", .{addr});
-			return 0x00;
-		},
-	}
+	return switch (page) {
+		0x00 ... 0x0F => self.mem[addr],
+		0xD0 => self.read_pia(@truncate(addr)),
+		0xFF => wozmon[@as(u8, @truncate(addr))],
+		else => 0x00,
+	};
 }
 
 fn write_fn(interface: *Interface, addr: u16, val: u8) void {
@@ -177,17 +140,11 @@ fn write_fn(interface: *Interface, addr: u16, val: u8) void {
 	const page: u8 = @truncate(addr >> 8);
 
 	switch (page) {
-		0x00 ... 0x0F => {
-			self.mem[addr] = val;
-		},
-		0xD0 => {
-			self.write_pia(@truncate(addr), val);
-		},
-		0xFF => {
-			std.debug.print("[ Apple1 ] attempted write to wozmon+0x{X:0>2}\n", .{@as(u8, @truncate(addr))});
-		},
-		else => {
-			std.debug.print("[ Apple1 ] attempted write to 0x{X:0>4}\n", .{addr});
-		},
+		0x00 ... 0x0F => self.mem[addr] = val,
+		0xD0 => self.write_pia(@truncate(addr), val),
+
+		// The program is doing something odd if it tries to write to these adresses
+		0xFF => std.debug.print("[ Apple1 ] attempted write to wozmon+0x{X:0>2}\n", .{@as(u8, @truncate(addr))}),
+		else => std.debug.print("[ Apple1 ] attempted write to 0x{X:0>4}\n", .{addr}),
 	}
 }

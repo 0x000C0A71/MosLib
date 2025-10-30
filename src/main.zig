@@ -55,7 +55,7 @@ pub fn main() !void {
 		try core.step_1_instruction();
 		instr_count += 1;
 
-		std.Thread.sleep(1_500_000); // for the 70s vibe
+		std.Thread.sleep(1_000_000); // for the 70s vibe
 	}
 
 }
