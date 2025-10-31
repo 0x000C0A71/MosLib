@@ -1,7 +1,13 @@
 
 const std = @import("std");
 
+const Operand        = @import("common.zig").Operand;
+const Opcode         = @import("common.zig").Opcode;
+const AddressingMode = @import("common.zig").AddressingMode;
+const Instruction    = @import("common.zig").Instruction;
+
 state: struct {
+	// TODO: consider separating ISA state (e.g. the registers) from the microarch state (e.g. nmi_latch)
 	accumulator: u8,
 	x_index: u8,
 	y_index: u8,
@@ -18,6 +24,9 @@ state: struct {
 		overflow: bool,
 		negative: bool,
 	},
+
+	nmi_queued: bool = false,
+	irq_active: bool = false,
 
 	pub fn format(
 		self: @This(),
@@ -40,6 +49,9 @@ state: struct {
 			\\    I: {}
 			\\    Z: {}
 			\\    C: {}
+			\\  u-arch:
+			\\    NMI queued: {}
+			\\    IRQ active: {}
 		;
 		try writer.print(fmt, .{
 			self.accumulator, self.accumulator,
@@ -58,6 +70,9 @@ state: struct {
 				self.flags.interrupt,
 				self.flags.zero,
 				self.flags.carry,
+
+			self.nmi_queued,
+			self.irq_active,
 		});
 	}
 },
@@ -68,112 +83,6 @@ pub const Interface = struct {
 	mem_write: *const fn (*@This(), u16, u8) void,
 };
 
-const AddressingMode = enum {
-	accumulator,        // A       Accumulator           OPC A         operand is AC (implied single byte instruction)
-	absolute,           // abs     absolute              OPC $LLHH     operand is address $HHLL *
-	absolute_x_indexed, // abs,X   absolute, X-indexed   OPC $LLHH,X   operand is address; effective address is address incremented by X with carry **
-	absolute_y_indexed, // abs,Y   absolute, Y-indexed   OPC $LLHH,Y   operand is address; effective address is address incremented by Y with carry **
-	immediate,          // #       immediate             OPC #$BB      operand is byte BB
-	implied,            // impl    implied               OPC           operand implied
-	indirect,           // ind     indirect              OPC ($LLHH)   operand is address; effective address is contents of word at address: C.w($HHLL)
-	x_indexed_indirect, // X,ind   X-indexed, indirect   OPC ($LL,X)   operand is zeropage address; effective address is word in (LL + X, LL + X + 1), inc. without carry: C.w($00LL + X)
-	indirect_y_indexed, // ind,Y   indirect, Y-indexed   OPC ($LL),Y   operand is zeropage address; effective address is word in (LL, LL + 1) incremented by Y with carry: C.w($00LL) + Y
-	relative,           // rel     relative              OPC $BB       branch target is PC + signed offset BB ***
-	zeropage,           // zpg     zeropage              OPC $LL       operand is zeropage address (hi-byte is zero, address = $00LL)
-	zeropage_x_indexed, // zpg,X   zeropage, X-indexed   OPC $LL,X     operand is zeropage address; effective address is address incremented by X without carry **
-	zeropage_y_indexed, // zpg,Y   zeropage, Y-indexed   OPC $LL,Y     operand is zeropage address; effective address is address incremented by Y without carry **
-
-	// *   16-bit address words are little endian, lo(w)-byte first, followed by the hi(gh)-byte.
-	//     (An assembler will use a human readable, big-endian notation as in $HHLL.)
-	// 
-	// **  The available 16-bit address space is conceived as consisting of pages of 256 bytes each, with
-	//     address hi-bytes represententing the page index. An increment with carry may affect the hi-byte
-	//     and may thus result in a crossing of page boundaries, adding an extra cycle to the execution.
-	//     Increments without carry do not affect the hi-byte of an address and no page transitions do occur.
-	//     Generally, increments of 16-bit addresses include a carry, increments of zeropage addresses don't.
-	//     Notably this is not related in any way to the state of the carry flag in the status register.
-	// 
-	// *** Branch offsets are signed 8-bit values, -128 ... +127, negative offsets in two's complement.
-	//     Page transitions may occur and add an extra cycle to the exucution. 
-};
-
-const Opcode = enum {
-	ADC, // add with carry
-	AND, // and (with accumulator)
-	ASL, // arithmetic shift left
-	BCC, // branch on carry clear
-	BCS, // branch on carry set
-	BEQ, // branch on equal (zero set)
-	BIT, // bit test
-	BMI, // branch on minus (negative set)
-	BNE, // branch on not equal (zero clear)
-	BPL, // branch on plus (negative clear)
-	BRK, // break / interrupt
-	BVC, // branch on overflow clear
-	BVS, // branch on overflow set
-	CLC, // clear carry
-	CLD, // clear decimal
-	CLI, // clear interrupt disable
-	CLV, // clear overflow
-	CMP, // compare (with accumulator)
-	CPX, // compare with X
-	CPY, // compare with Y
-	DEC, // decrement
-	DEX, // decrement X
-	DEY, // decrement Y
-	EOR, // exclusive or (with accumulator)
-	INC, // increment
-	INX, // increment X
-	INY, // increment Y
-	JMP, // jump
-	JSR, // jump subroutine
-	LDA, // load accumulator
-	LDX, // load X
-	LDY, // load Y
-	LSR, // logical shift right
-	NOP, // no operation
-	ORA, // or with accumulator
-	PHA, // push accumulator
-	PHP, // push processor status (SR)
-	PLA, // pull accumulator
-	PLP, // pull processor status (SR)
-	ROL, // rotate left
-	ROR, // rotate right
-	RTI, // return from interrupt
-	RTS, // return from subroutine
-	SBC, // subtract with carry
-	SEC, // set carry
-	SED, // set decimal
-	SEI, // set interrupt disable
-	STA, // store accumulator
-	STX, // store X
-	STY, // store Y
-	TAX, // transfer accumulator to X
-	TAY, // transfer accumulator to Y
-	TSX, // transfer stack pointer to X
-	TXA, // transfer X to accumulator
-	TXS, // transfer X to stack pointer
-	TYA, // transfer Y to accumulator 
-};
-
-const Operand = union(AddressingMode) {
-	accumulator,             // A       Accumulator           OPC A         operand is AC (implied single byte instruction)
-	absolute: u16,           // abs     absolute              OPC $LLHH     operand is address $HHLL *
-	absolute_x_indexed: u16, // abs,X   absolute, X-indexed   OPC $LLHH,X   operand is address; effective address is address incremented by X with carry **
-	absolute_y_indexed: u16, // abs,Y   absolute, Y-indexed   OPC $LLHH,Y   operand is address; effective address is address incremented by Y with carry **
-	immediate: u8,           // #       immediate             OPC #$BB      operand is byte BB
-	implied,                 // impl    implied               OPC           operand implied
-	indirect: u16,           // ind     indirect              OPC ($LLHH)   operand is address; effective address is contents of word at address: C.w($HHLL)
-	x_indexed_indirect: u8,  // X,ind   X-indexed, indirect   OPC ($LL,X)   operand is zeropage address; effective address is word in (LL + X, LL + X + 1), inc. without carry: C.w($00LL + X)
-	indirect_y_indexed: u8,  // ind,Y   indirect, Y-indexed   OPC ($LL),Y   operand is zeropage address; effective address is word in (LL, LL + 1) incremented by Y with carry: C.w($00LL) + Y
-	relative: i8,            // rel     relative              OPC $BB       branch target is PC + signed offset BB ***
-	zeropage: u8,            // zpg     zeropage              OPC $LL       operand is zeropage address (hi-byte is zero, address = $00LL)
-	zeropage_x_indexed: u8,  // zpg,X   zeropage, X-indexed   OPC $LL,X     operand is zeropage address; effective address is address incremented by X without carry **
-	zeropage_y_indexed: u8,  // zpg,Y   zeropage, Y-indexed   OPC $LL,Y     operand is zeropage address; effective address is address incremented by Y without carry **
-};
-
-
-const Instruction = struct{ Opcode, Operand };
 
 const decode_map: [256]?struct{Opcode, AddressingMode} = .{
 	.{.BRK, .implied   }, .{.ORA, .x_indexed_indirect},       null         , null,             null             , .{.ORA, .zeropage           }, .{.ASL, .zeropage           }, null, .{.PHP, .implied}, .{.ORA, .immediate          }, .{.ASL, .accumulator      }, null,             null             , .{.ORA, .absolute           }, .{.ASL, .absolute           }, null,
@@ -253,6 +162,8 @@ fn next_instruction(self: *@This()) !Instruction {
 }
 
 pub fn reset(self: *@This()) void {
+	self.state.nmi_queued = false; // TODO: check if there is no better way to handle this
+	self.state.irq_active = false; // TODO: check if there is no better way to handle this
 	self.state.program_counter = self.memory_read16(0xFFFC);
 }
 
@@ -520,6 +431,11 @@ fn run_instruction(self: *@This(), instr: Instruction) void {
 			self.write_operand(operand, r);
 		},
 
+		.RTI => {
+			self.pull_sr();
+			self.state.program_counter = self.pull16();
+		},
+
 		else => |i| {
 			std.debug.print("!!! UNIMPLEMENTED INSTRUCTION: {s}\n", .{@tagName(i)});
 			unreachable;
@@ -528,7 +444,47 @@ fn run_instruction(self: *@This(), instr: Instruction) void {
 }
 
 
+pub inline fn trigger_nmi(self: *@This()) void {
+	self.state.nmi_queued = true;
+}
+
+// TODO: candidate for inlining
+fn push_sr(self: *@This(), b_flag: bool) void {
+	var flags = self.state.flags;
+	flags.b_flag = b_flag; // TODO: verify that the implementation of the B-flag is correct
+
+	const as_byte: u8 = @bitCast(flags);
+	self.push8(as_byte);
+}
+
+// TODO: candidate for inlining
+fn pull_sr(self: *@This()) void {
+	const as_byte: u8 = self.pull8();
+	self.state.flags = @bitCast(as_byte);
+
+	// TODO: verify that the b-flag has no influence on popping
+}
+
+// TODO: candidate for inlining
+fn enter_interrupt(self: *@This(), is_nmi: bool) void {
+	self.push16(self.state.program_counter);
+	self.push_sr(undefined); // TODO: figure out what to do here with the B-flag
+	self.state.flags.interrupt = true;
+	self.state.program_counter = self.memory_read16(if (is_nmi) 0xFFFA else 0xFFFE);
+}
+
 pub fn step_1_instruction(self: *@This()) !void {
+	if (self.state.nmi_queued) {
+		std.debug.print("doing nmi\n", .{});
+
+		self.enter_interrupt(true);
+		self.state.nmi_queued = false;
+
+	} else if (self.state.irq_active and !self.state.flags.interrupt) {
+		self.enter_interrupt(false);
+	}
+
+
 	const ip = self.state.program_counter;
 	const instr = try self.next_instruction();
 	//std.debug.print("running instr {} from 0x{X:0>4}\n", .{instr, ip});

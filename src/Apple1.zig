@@ -48,6 +48,9 @@ const wozmon = [0x100]u8{
 	0x00, 0x00, 0x00, 0x0F, 0x00, 0xFF, 0x00, 0x00, // FFF8 - FFFF
 };
 
+
+
+
 //
 // It is very important to have the reader configured in a way, that
 // read attempts while no new character is available, either pass through

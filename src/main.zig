@@ -2,7 +2,7 @@ const std = @import("std");
 const MosLib = @import("MosLib");
 
 
-pub fn main() !void {
+fn apple1_main() !void {
 
 	var stdout_buffer: [1024]u8 = undefined;
 	var stdin_buffer: [1024]u8 = undefined;
@@ -29,7 +29,7 @@ pub fn main() !void {
 		new_term_settings.lflag.ECHO = false;
 		_ = std.posix.tcsetattr(stdin_file.handle, .NOW, new_term_settings) catch {};
 	}
-    
+	
 
 
 	var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
@@ -59,3 +59,48 @@ pub fn main() !void {
 	}
 
 }
+
+fn rawmem_main() !void {
+
+
+	var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+	defer _ = gpa.deinit();
+
+	const alloc = gpa.allocator();
+
+	var mapper = MosLib.boards.RawMemory.init(@ptrCast(try alloc.alloc(u8, 0x10000)));
+	defer alloc.free(mapper.mem);
+
+	var core = MosLib.Mos6502{
+		.state = undefined,
+		.interface = &mapper.interface,
+	};
+
+
+	mapper.write16(0xFFFC, 0x0200);
+	mapper.write16(0xFFFA, 0x0300);
+	mapper.blit(0x0200, &.{
+		0xD8, 0x58, 0x18, 0xA9, 0x88, 0xA9, 0xFF, 0x4C,
+		0x03, 0x02,
+	});
+	mapper.blit(0x0300, &.{
+		0x68, 0xAA, 0x68, 0x48, 0x8A, 0x48, 0x58, 0x40,
+	});
+	
+
+	core.reset();
+
+	std.debug.print("{f}\n", .{core.state});
+	for (0..20) |n| {
+		if (n == 8) core.trigger_nmi();
+		try core.step_1_instruction();
+		std.debug.print("t {}\n{f}\n", .{n, core.state});
+	}
+}
+
+
+pub fn main() !void {
+	return apple1_main();
+}
+
+
