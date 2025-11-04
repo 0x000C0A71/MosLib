@@ -484,11 +484,8 @@ pub fn step_1_instruction(self: *@This()) !void {
 		self.enter_interrupt(false);
 	}
 
-
-	const ip = self.state.program_counter;
 	const instr = try self.next_instruction();
-	//std.debug.print("running instr {} from 0x{X:0>4}\n", .{instr, ip});
-	_ = ip;
+	std.debug.print("running instr {} from 0x{X:0>4}\n", .{instr, self.state.program_counter});
 	self.run_instruction(instr);
 }
 
