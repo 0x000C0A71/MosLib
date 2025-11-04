@@ -51,6 +51,8 @@ status: packed struct(u8) {
 	unused: u6 = undefined,
 } = .{},
 
+last_attempted_write: u8,
+
 core: *Core,
 
 
@@ -94,6 +96,7 @@ pub fn format(
 		\\    mapped to: 0x{X} (+0x{X:0>6})
 		\\    read allowed: {}
 		\\    write allowed: {}
+		\\  last attempted write: {} (0x{X:0>2})
 		\\  status: (0x{X:0>2})
 		\\    is_priviledged: {}
 		\\    is_bootrom:     {}
@@ -107,6 +110,7 @@ pub fn format(
 			lut_res.page_index, @as(u24, lut_res.page_index) << 10,
 			lut_res.perms.read,
 			lut_res.perms.write,
+		self.last_attempted_write, self.last_attempted_write,
 		@as(u8, @bitCast(self.status)),
 			self.status.is_priviledged,
 			self.status.is_bootrom,
@@ -151,7 +155,8 @@ fn read_regs(self: *const @This(), offset: u3) u8 {
 	// 111 lut_out_hi ( This mapps to the above selected cell of the lut                )
 
 	return switch (offset) {
-		0b000, 0b001 => @bitCast(self.status),
+		0b000 => @bitCast(self.status),
+		0b001 => self.last_attempted_write,
 		0b010 => @truncate(@as(u16, self.active)),
 		0b011 => @truncate(@as(u16, self.active) >> 8),
 		0b100 => @truncate(@as(u16, self.lut_exposed)),
@@ -172,7 +177,8 @@ fn write_regs(self: *@This(), offset: u3, val: u8) void {
 	// 111 lut_out_hi ( This mapps to the above selected cell of the lut                )
 
 	switch (offset) {
-		0b000, 0b001 => self.status = @bitCast(val),
+		0b000 => self.status = @bitCast(val),
+		0b001 => self.last_attempted_write = val,
 		0b010 => {
 			const old = @as(u16, self.active) & 0xFF00;
 			self.active = @truncate(old | val);
@@ -286,6 +292,7 @@ fn core_write_fn(interface: *Interface, addr: u16, val: u8) void {
 	
 	if ((addr & 0xFF00) == 0xFF00) {
 		if (!self.status.is_priviledged) {
+			self.last_attempted_write = val;
 			self.trip();
 			return;
 		}
@@ -299,6 +306,7 @@ fn core_write_fn(interface: *Interface, addr: u16, val: u8) void {
 	const is_legal = perms.write | self.status.is_priviledged;
 
 	if (!is_legal) {
+		self.last_attempted_write = val;
 		self.trip();
 		return;
 	}
