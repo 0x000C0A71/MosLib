@@ -52,6 +52,7 @@ status: packed struct(u8) {
 } = .{},
 
 last_attempted_write: u8,
+last_attempted_write_addr: u16,
 
 core: *Core,
 
@@ -144,64 +145,93 @@ fn map_addr(self: *const @This(), addr: u16) struct { u24, Perms } {
 }
 
 
-fn read_regs(self: *const @This(), offset: u3) u8 {
-	// 000 status
-	// 001 status (mirrored)
-	// 010 active_lo  ( This marks which map the mmu will use to map rn                 )
-	// 011 active_hi  ( This marks which map the mmu will use to map rn                 )
-	// 100 lut_in_lo  ( writing an address here enables writing to that cell of the lut )
-	// 101 lut_in_hi  ( writing an address here enables writing to that cell of the lut )
-	// 110 lut_out_lo ( This mapps to the above selected cell of the lut                )
-	// 111 lut_out_hi ( This mapps to the above selected cell of the lut                )
+fn read_regs(self: *const @This(), offset: u4) u8 {
+	// 0000 status
+	// 0001 law_val    ( last attempted write           )
+	// 0010 law_lo     ( last attempted write addr low  )
+	// 0011 law_hi     ( last attempted write addr high )
+	// 0100 lut_in_lo  ( writing an address here enables writing to that cell of the lut )
+	// 0101 lut_in_hi  ( writing an address here enables writing to that cell of the lut )
+	// 0110 lut_out_lo ( This mapps to the above selected cell of the lut                )
+	// 0111 lut_out_hi ( This mapps to the above selected cell of the lut                )
+	// 1000 active_lo  ( This marks which map the mmu will use to map rn                 )
+	// 1001 active_hi  ( This marks which map the mmu will use to map rn                 )
+	// 1010 active_lo  ( mirrored                                                        )
+	// 1011 active_hi  ( mirrored                                                        )
+	// 1100 active_lo  ( mirrored                                                        )
+	// 1101 active_hi  ( mirrored                                                        )
+	// 1110 active_lo  ( mirrored                                                        )
+	// 1111 active_hi  ( mirrored                                                        )
 
 	return switch (offset) {
-		0b000 => @bitCast(self.status),
-		0b001 => self.last_attempted_write,
-		0b010 => @truncate(@as(u16, self.active)),
-		0b011 => @truncate(@as(u16, self.active) >> 8),
-		0b100 => @truncate(@as(u16, self.lut_exposed)),
-		0b101 => @truncate(@as(u16, self.lut_exposed) >> 8),
-		0b110 => @truncate(@as(u16, @bitCast(self.lut[self.lut_exposed]))),
-		0b111 => @truncate(@as(u16, @bitCast(self.lut[self.lut_exposed])) >> 8),
+		0b0000 => @bitCast(self.status),
+
+		0b0001 => self.last_attempted_write,
+		0b0010 => @truncate(@as(u16, self.last_attempted_write_addr)),
+		0b0011 => @truncate(@as(u16, self.last_attempted_write_addr) >> 8),
+
+		0b0100 => @truncate(@as(u16, self.lut_exposed)),
+		0b0101 => @truncate(@as(u16, self.lut_exposed) >> 8),
+		0b0110 => @truncate(@as(u16, @bitCast(self.lut[self.lut_exposed]))),
+		0b0111 => @truncate(@as(u16, @bitCast(self.lut[self.lut_exposed])) >> 8),
+
+		0b1000, 0b1010, 0b1100, 0b1110 => @truncate(@as(u16, self.active)),
+		0b1001, 0b1011, 0b1101, 0b1111 => @truncate(@as(u16, self.active) >> 8),
 	};
 }
 
-fn write_regs(self: *@This(), offset: u3, val: u8) void {
-	// 000 status
-	// 001 status (mirrored)
-	// 010 active_lo  ( This marks which map the mmu will use to map rn                 )
-	// 011 active_hi  ( This marks which map the mmu will use to map rn                 )
-	// 100 lut_in_lo  ( writing an address here enables writing to that cell of the lut )
-	// 101 lut_in_hi  ( writing an address here enables writing to that cell of the lut )
-	// 110 lut_out_lo ( This mapps to the above selected cell of the lut                )
-	// 111 lut_out_hi ( This mapps to the above selected cell of the lut                )
+fn write_regs(self: *@This(), offset: u4, val: u8) void {
+	// 0000 status
+	// 0001 law_val    ( last attempted write           )
+	// 0010 law_lo     ( last attempted write addr low  )
+	// 0011 law_hi     ( last attempted write addr high )
+	// 0100 lut_in_lo  ( writing an address here enables writing to that cell of the lut )
+	// 0101 lut_in_hi  ( writing an address here enables writing to that cell of the lut )
+	// 0110 lut_out_lo ( This mapps to the above selected cell of the lut                )
+	// 0111 lut_out_hi ( This mapps to the above selected cell of the lut                )
+	// 1000 active_lo  ( This marks which map the mmu will use to map rn                 )
+	// 1001 active_hi  ( This marks which map the mmu will use to map rn                 )
+	// 1010 active_lo  ( mirrored                                                        )
+	// 1011 active_hi  ( mirrored                                                        )
+	// 1100 active_lo  ( mirrored                                                        )
+	// 1101 active_hi  ( mirrored                                                        )
+	// 1110 active_lo  ( mirrored                                                        )
+	// 1111 active_hi  ( mirrored                                                        )
 
 	switch (offset) {
-		0b000 => self.status = @bitCast(val),
-		0b001 => self.last_attempted_write = val,
-		0b010 => {
-			const old = @as(u16, self.active) & 0xFF00;
-			self.active = @truncate(old | val);
+		0b0000 => self.status = @bitCast(val),
+		0b0001 => self.last_attempted_write = val,
+		0b0010 => {
+			const old = @as(u16, self.last_attempted_write_addr) & 0xFF00;
+			self.last_attempted_write_addr = @truncate(old | val);
 		},
-		0b011 => {
-			const old = @as(u16, self.active) & 0x00FF;
-			self.active = @truncate(old | (@as(u16, val) << 8));
+		0b0011 => {
+			const old = @as(u16, self.last_attempted_write_addr) & 0x00FF;
+			self.last_attempted_write_addr = @truncate(old | (@as(u16, val) << 8));
 		},
-		0b100 => {
+		0b0100 => {
 			const old = self.lut_exposed & 0xFF00;
 			self.lut_exposed = @truncate(old | val);
 		},
-		0b101 => {
+		0b0101 => {
 			const old = self.lut_exposed & 0x00FF;
 			self.lut_exposed = @truncate(old | (@as(u16, val) << 8));
 		},
-		0b110 => {
+		0b0110 => {
 			const old = @as(u16, @bitCast(self.lut[self.lut_exposed])) & 0xFF00;
 			self.lut[self.lut_exposed] = @bitCast(old | val);
 		},
-		0b111 => {
+		0b0111 => {
 			const old = @as(u16, @bitCast(self.lut[self.lut_exposed])) & 0xFF00;
 			self.lut[self.lut_exposed] = @bitCast(old | (@as(u16, val) << 8));
+		},
+		0b1000, 0b1010, 0b1100, 0b1110 => {
+			const old = @as(u16, self.active) & 0xFF00;
+			self.active = @truncate(old | val);
+		},
+		0b1001, 0b1011, 0b1101, 0b1111 => {
+			const old = @as(u16, self.active) & 0x00FF;
+			self.active = @truncate(old | (@as(u16, val) << 8));
 		},
 	}
 }
@@ -209,17 +239,10 @@ fn write_regs(self: *@This(), offset: u3, val: u8) void {
 fn internal_read(self: *const @This(), offset: u8) u8 {
 	// all addresses that match $FFxx get mapped here
 
-	// 1111111100000000 status
-	// 1111111100000001 status (mirrored)
-	// 1111111100000010 active_lo  ( This marks which map the mmu will use to map rn                 )
-	// 1111111100000011 active_hi  ( This marks which map the mmu will use to map rn                 )
-	// 1111111100000100 lut_in_lo  ( writing an address here enables writing to that cell of the lut )
-	// 1111111100000101 lut_in_hi  ( writing an address here enables writing to that cell of the lut )
-	// 1111111100000110 lut_out_lo ( This mapps to the above selected cell of the lut                )
-	// 1111111100000111 lut_out_hi ( This mapps to the above selected cell of the lut                )
+	// 111111110000xxxx passed through to regs (see read_regs and write_regs)
 	// 11111111xxxxxxxx passed through to 0000000000000000xxxxxxxx or to bootroom depending on flag
 
-	if ((offset & 0b11111000) == 0)	return self.read_regs(@truncate(offset));
+	if ((offset & 0b11110000) == 0)	return self.read_regs(@truncate(offset));
 
 	if (self.status.is_bootrom) {
 		return self.boot_rom[offset];
@@ -231,17 +254,12 @@ fn internal_read(self: *const @This(), offset: u8) u8 {
 fn internal_write(self: *@This(), offset: u8, val: u8) void {
 	// all addresses that match $FFxx get mapped here
 
-	// 1111111100000000 status
-	// 1111111100000001 status (mirrored)
-	// 1111111100000010 active_lo  ( This marks which map the mmu will use to map rn                 )
-	// 1111111100000011 active_hi  ( This marks which map the mmu will use to map rn                 )
-	// 1111111100000100 lut_in_lo  ( writing an address here enables writing to that cell of the lut )
-	// 1111111100000101 lut_in_hi  ( writing an address here enables writing to that cell of the lut )
-	// 1111111100000110 lut_out_lo ( This mapps to the above selected cell of the lut                )
-	// 1111111100000111 lut_out_hi ( This mapps to the above selected cell of the lut                )
+
+	// 111111110000xxxx passed through to regs (see read_regs and write_regs)
 	// 11111111xxxxxxxx passed through to 0000000000000000xxxxxxxx or to bootroom depending on flag
 
-	if ((offset & 0b11111000) == 0)	self.write_regs(@truncate(offset), val);
+
+	if ((offset & 0b11110000) == 0)	self.write_regs(@truncate(offset), val);
 
 	if (self.status.is_bootrom) {
 		//return self.boot_rom[offset];
@@ -293,6 +311,7 @@ fn core_write_fn(interface: *Interface, addr: u16, val: u8) void {
 	if ((addr & 0xFF00) == 0xFF00) {
 		if (!self.status.is_priviledged) {
 			self.last_attempted_write = val;
+			self.last_attempted_write_addr = addr;
 			self.trip();
 			return;
 		}
@@ -306,7 +325,8 @@ fn core_write_fn(interface: *Interface, addr: u16, val: u8) void {
 	const is_legal = perms.write | self.status.is_priviledged;
 
 	if (!is_legal) {
-		self.last_attempted_write = val;
+		self.last_attempted_write = 0;
+		self.last_attempted_write_addr = addr;
 		self.trip();
 		return;
 	}
