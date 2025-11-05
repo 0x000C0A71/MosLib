@@ -10,13 +10,24 @@
 
 
 * = $FF00
-mmu_status:   .word 0 ; status
-mmu_active_l: .byte 0 ; active_lo  ( This marks which map the mmu will use to map rn                 )
-mmu_active_h: .byte 0 ; active_hi  ( This marks which map the mmu will use to map rn                 )
-mmu_lut_i_l:  .byte 0 ; lut_in_lo  ( writing an address here enables writing to that cell of the lut )
-mmu_lut_i_h:  .byte 0 ; lut_in_hi  ( writing an address here enables writing to that cell of the lut )
-mmu_lut_o_l:  .byte 0 ; lut_out_lo ( This mapps to the above selected cell of the lut                )
-mmu_lut_o_h:  .byte 0 ; lut_out_hi ( This mapps to the above selected cell of the lut                )
+
+mmu_status:   .byte 0
+mmu_law_val:  .byte 0 ; ( last attempted write           )
+mmu_law_l:    .byte 0 ; ( last attempted write addr low  )
+mmu_law_h:    .byte 0 ; ( last attempted write addr high )
+mmu_lut_i_l:  .byte 0 ; ( writing an address here enables writing to that cell of the lut )
+mmu_lut_i_h:  .byte 0 ; ( writing an address here enables writing to that cell of the lut )
+mmu_lut_o_l:  .byte 0 ; ( This mapps to the above selected cell of the lut                )
+mmu_lut_o_h:  .byte 0 ; ( This mapps to the above selected cell of the lut                )
+mmu_active_l: .byte 0 ; ( This marks which map the mmu will use to map rn                 )
+mmu_active_h: .byte 0 ; ( This marks which map the mmu will use to map rn                 )
+mmu_al_m1:    .byte 0 ; ( mirrored                                                        )
+mmu_ah_m1:    .byte 0 ; ( mirrored                                                        )
+mmu_al_m2:    .byte 0 ; ( mirrored                                                        )
+mmu_ah_m2:    .byte 0 ; ( mirrored                                                        )
+mmu_al_m3:    .byte 0 ; ( mirrored                                                        )
+mmu_ah_m3:    .byte 0 ; ( mirrored                                                        )
+
 
 _start = $0200 ; where any process' `_start` symbol points to
 
@@ -257,13 +268,16 @@ _start:
 	sta $8000
 
 
+
+
 yield:
 	pha
 	lda #0
-	sta $FFFF
+	sta $FF00
 	pla
 	rts
 
+.align $8
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -301,6 +315,8 @@ do_yield:
 yield:
 	pha
 	lda #0
-	sta $FFFF
+	sta $FF00
 	pla
 	rts
+
+.align $8

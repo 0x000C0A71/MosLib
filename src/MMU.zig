@@ -72,6 +72,10 @@ pub fn init(lut: *[1<<@bitSizeOf(LutInput)]LutOutput, boot_rom: *const [0x100]u8
 			.mem_read = core_read_fn,
 			.mem_write = core_write_fn,
 		},
+
+		.last_attempted_write = undefined,
+		.last_attempted_write_addr = undefined,
+
 		.mem_interface = interface,
 		.boot_rom = boot_rom,
 		.status = .{},
@@ -97,7 +101,7 @@ pub fn format(
 		\\    mapped to: 0x{X} (+0x{X:0>6})
 		\\    read allowed: {}
 		\\    write allowed: {}
-		\\  last attempted write: {} (0x{X:0>2})
+		\\  last attempted write: {} (0x{X:0>2}) at 0x{X:0>4}
 		\\  status: (0x{X:0>2})
 		\\    is_priviledged: {}
 		\\    is_bootrom:     {}
@@ -111,7 +115,7 @@ pub fn format(
 			lut_res.page_index, @as(u24, lut_res.page_index) << 10,
 			lut_res.perms.read,
 			lut_res.perms.write,
-		self.last_attempted_write, self.last_attempted_write,
+		self.last_attempted_write, self.last_attempted_write, self.last_attempted_write_addr,
 		@as(u8, @bitCast(self.status)),
 			self.status.is_priviledged,
 			self.status.is_bootrom,
@@ -307,7 +311,7 @@ fn core_read_fn(interface: *Interface, addr: u16) u8 {
 
 fn core_write_fn(interface: *Interface, addr: u16, val: u8) void {
 	const self: *@This() = @fieldParentPtr("core_interface", interface);
-	
+
 	if ((addr & 0xFF00) == 0xFF00) {
 		if (!self.status.is_priviledged) {
 			self.last_attempted_write = val;
